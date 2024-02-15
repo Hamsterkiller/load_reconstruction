@@ -123,9 +123,11 @@ class PowerSystem:
         self.vetv['b'] = -convert_to_relative_units(self.vetv['b'], 'µS', unom_from)
         self.vetv['b_from'] = -convert_to_relative_units(self.vetv['b_from'], 'µS', unom_from)
         self.vetv['b_to'] = -convert_to_relative_units(self.vetv['b_to'], 'µS', unom_to)
-        # TODO: this might be shit
-        self.vetv['p_from'] = convert_to_relative_units(self.vetv['flow'], 'MW', unom_from)
-        self.vetv['p_to'] = convert_to_relative_units(self.vetv['flow_to'], 'MW', unom_to)
+
+        self.vetv['u_from'] = convert_to_relative_units(self.vetv['u_from'], 'kV', unom_from)
+        self.vetv['u_to'] = convert_to_relative_units(self.vetv['u_to'], 'kV', unom_to)
+        self.vetv['p_from'] = convert_to_relative_units(self.vetv['p_from'], 'MW', unom_from)
+        self.vetv['p_to'] = convert_to_relative_units(self.vetv['p_to'], 'MW', unom_to)
         # self.vetv['ktr'] = self.vetv['ktr'] / unom_to * unom_from
         # self.vetv['kti'] = self.vetv['kti'] / unom_to * unom_from
 

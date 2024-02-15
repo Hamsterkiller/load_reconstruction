@@ -65,6 +65,9 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     vetv = vetv[['node_from', 'node_to', 'pnum', 'type', 'r', 'x', 'g', 'b', 'b_from',
                  'b_to', 'ktr', 'kti', 'p_from', 'p_to']]
 
+    # filter out lines with zeroth ats_flow and nodes, disconnected from 514986 sw node
+    
+
     node_u_values = src_data['node_prices'][['node', 'u', 'hour']].query(f'hour == {hour}').drop(['hour'], axis=1)
 
     # remove all nodes, that are not in the topology for this hour
@@ -77,13 +80,21 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     vetv_eq.loc[np.abs(vetv_eq['ktr']) < 1e-5, 'ktr'] = 1.0
     vetv_eq = vetv_eq.merge(node_u_values, left_on=['node_from'], right_on=['node'], how='left')
     vetv_eq.rename({'u': 'u_from'}, inplace=True, axis=1)
-    vetv_eq.drop({'node'}, axis=1, inplace=True)
+    vetv_eq.drop(['node'], axis=1, inplace=True)
     vetv_eq = vetv_eq.merge(node_u_values, left_on=['node_to'], right_on=['node'], how='left')
     vetv_eq.rename({'u': 'u_to'}, inplace=True, axis=1)
-    vetv_eq.drop({'node'}, axis=1, inplace=True)
-    vetv_dict = vetv_eq.to_dict(orient='records')
-    node_dict = node.to_dict(orient='records')
+    vetv_eq.drop(['node'], axis=1, inplace=True)
+
+    # initialize PowerSystem instance
+    ps = PowerSystem(node, vetv_eq)
+    vetv_dict = ps.vetv.to_dict(orient='records')
+    node_dict = ps.node.to_dict(orient='records')
+    node_u_values = node_u_values.merge(right=ps.node[['node', 'unom']], on=['node'], how='left')
+    relative_u_values = convert_to_relative_units(node_u_values['u'].values, 'kV', node_u_values['unom'].values)
+    node_u_values.u = relative_u_values
+    node_u_values.drop(['unom'], axis=1, inplace=True)
     node_u_dict = node_u_values.to_dict(orient='records')
+
     system_graph = create_system_graph(node_dict, vetv_dict, node_u_dict)
 
     # calculate u value for each node with unknown u
@@ -97,11 +108,16 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
 
     # calculate dd for each line in graph without known dd
     calc_u_deltas(system_graph)
+    dd_dict_df = []
+    for nf, nt, v in system_graph.edges(data=True):
+        dd_dict_df.append({'node_from': v['node_from'], 'node_to': v['node_to'], 'dd': v['dd']})
+    dd_df = pd.DataFrame.from_records(dd_dict_df)
 
-    # node, vetv = power_system_connectivity(node, vetv)
+    # calculate reactive power flows for each line in the system and qn in each node
+    q_flows = calc_q_flows(system_graph)
 
-    # initialize PowerSystem instance
-    ps = PowerSystem(node, vetv)
+    # calculate qg bus injections
+    # qg = calc_q_injections(ps, line_flows, Q_f, Q_t)
 
     # correct u values of needed
     u_df = ps.node[['node', 'unom']].merge(right=u_df, on=['node'], how='left')
@@ -120,32 +136,21 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     node_pg = ps.node.node.to_frame().merge(right=node_pg, on=['node'], how='left').fillna(0)
     node_pg.rename({'p': 'pg'}, axis=1, inplace=True)
     node_pg = ps.node['node'].to_frame().merge(right=node_pg, on=['node'], how='left')
+    node_pg['pg'] /= 100
 
     # calculate pn for each node in the system
     pn = calc_node_pn(ps, node_pg)
-    idx = np.where(pn < 0)
-    pn[idx] = 0.0;
-    node_pn = pd.concat([node_pg.node, pd.Series(pn.reshape(-1))], axis=1)
-    node_pn.columns = ['node', 'pn']
-
-    # calculate U angle differences for each line, where both nodes have known U value
-    # bus_voltages = src_data['node_prices'].loc[(~src_data['node_prices'].u.isna())
-    #                                            & (src_data['node_prices'].hour == hour), ['node', 'u']]
-    # line_flows = ps.vetv[['node_from', 'node_to', 'pnum', 'type', 'r', 'x', 'g', 'b', 'ktr', 'flow', 'flow_to']]
-    # deltas = calc_u_deltas(u_df, line_flows)
-
-    # calculate reactive power flows for each line in the system and qn in each node
-    # Q_f, Q_t = calc_q_flows(ps, u_df, line_flows, deltas)
-
-    # calculate qg bus injections
-    # qg = calc_q_injections(ps, line_flows, Q_f, Q_t)
+    # node_pn = pd.concat([node_pg.node, pd.Series(pn.reshape(-1))], axis=1)
+    # node_pn.columns = ['node', 'pn']
+    # node_pg = node_pg.merge(right=node_pn, on=['node'], how='left')
 
     # calculate regime using Newton method
-    # pg = convert_to_relative_units(np.array(node_pg.pg).reshape(node_pg.shape[0], 1), 'MW', np.ones(node_pg.shape[0]))
     # pg = np.array(node_pg.pg).reshape(node_pg.shape[0], 1)
     # p = (pg - pn).reshape(-1)
-    # q = qg.reshape(-1)
-    # Vbus, normF, converged = calc_rgm_newton(ps, p, q, verbose=True)
+    p = pn.reshape(-1)
+    # TODO replace with calculated qg values
+    q = np.zeros(p.shape[0])
+    Vbus, normF, converged = calc_rgm_newton(ps, p, q, verbose=True)
 
     # calculate qn for each node in the system, that has published U value
     # node_qn = ps.node[['node', 'qn', 'unom']].merge(right=node_u_values, on=['node'], how='inner')

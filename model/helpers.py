@@ -166,8 +166,8 @@ def vetv_equiv(vetv: pd.DataFrame) -> pd.DataFrame:
     """
 
     vetv['z'] = vetv['r'] + 1j * vetv['x']
-    is_zero = vetv['z'].abs() == 0
-    vetv.loc[is_zero, 'z'] = 1e-5j
+    is_zero = vetv['z'].abs() < 1e-2
+    vetv.loc[is_zero, 'z'] = 0.04 / 100
     vetv_new = vetv.groupby(by=['node_from', 'node_to']).agg({'pnum': 'count',
                                                               'type': 'min',
                                                               'z': calc_z_agg,
