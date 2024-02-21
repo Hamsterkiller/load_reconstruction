@@ -3,7 +3,7 @@ import numpy as np
 from .power_system import PowerSystem, convert_to_relative_units
 from .calc_node_pn import calc_node_pn
 from .calc_u_deltas import calc_u_deltas
-from .helpers import vetv_equiv
+from .helpers import vetv_equiv, power_system_connectivity
 from .calc_unknown_u_modules import calc_unknown_u_modules, create_system_graph
 from .calc_q_flows import calc_q_flows
 from .calc_q_injections import calc_q_injections
@@ -65,9 +65,6 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     vetv = vetv[['node_from', 'node_to', 'pnum', 'type', 'r', 'x', 'g', 'b', 'b_from',
                  'b_to', 'ktr', 'kti', 'p_from', 'p_to']]
 
-    # filter out lines with zeroth ats_flow and nodes, disconnected from 514986 sw node
-    
-
     node_u_values = src_data['node_prices'][['node', 'u', 'hour']].query(f'hour == {hour}').drop(['hour'], axis=1)
 
     # remove all nodes, that are not in the topology for this hour
@@ -85,10 +82,27 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     vetv_eq.rename({'u': 'u_to'}, inplace=True, axis=1)
     vetv_eq.drop(['node'], axis=1, inplace=True)
 
+    # filter out lines with zeroth ats_flow and nodes, disconnected from 514986 sw node
+    bus_conn, line_conn = power_system_connectivity(node, vetv_eq)
+
+    if any(bus_conn == 0.0):
+        disconnected_nodes = node.node.iloc[np.where(bus_conn == 0.0)].tolist()
+        disconnected_nodes_str = ','.join([str(el) for el in disconnected_nodes])
+        print(f'There is no balance bus in at least one connected area: ' + disconnected_nodes_str)
+        node = node.iloc[bus_conn != 0.0].copy()
+        vetv_eq = vetv_eq.iloc[line_conn != 0.0].copy()
+
+    # assume, that sw_bus is 514986, remove everything, that is not connected to this bus
+    bus_conn, line_conn = power_system_connectivity(node, vetv_eq)
+    main_balance = node.index[node.node == 514986].values[0]
+    node = node.loc[bus_conn == main_balance]
+    vetv = vetv_eq.loc[line_conn == main_balance]
+
     # initialize PowerSystem instance
-    ps = PowerSystem(node, vetv_eq)
+    ps = PowerSystem(node, vetv)
     vetv_dict = ps.vetv.to_dict(orient='records')
     node_dict = ps.node.to_dict(orient='records')
+    node_u_values = node_u_values[node_u_values.node.isin(ps.node.node)]
     node_u_values = node_u_values.merge(right=ps.node[['node', 'unom']], on=['node'], how='left')
     relative_u_values = convert_to_relative_units(node_u_values['u'].values, 'kV', node_u_values['unom'].values)
     node_u_values.u = relative_u_values
@@ -120,10 +134,10 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     # qg = calc_q_injections(ps, line_flows, Q_f, Q_t)
 
     # correct u values of needed
-    u_df = ps.node[['node', 'unom']].merge(right=u_df, on=['node'], how='left')
-    strange_idx = u_df.index[(u_df.u / u_df.unom > 1.5) | (u_df.u / u_df.unom < 0.5)]
-    for idx in strange_idx:
-        u_df.at[idx, 'u'] = u_df.iloc[idx].unom
+    # u_df = ps.node[['node', 'unom']].merge(right=u_df, on=['node'], how='left')
+    # strange_idx = u_df.index[(u_df.u / u_df.unom > 1.5) | (u_df.u / u_df.unom < 0.5)]
+    # for idx in strange_idx:
+    #     u_df.at[idx, 'u'] = u_df.iloc[idx].unom
 
     # calculate gen volumes for each node
     rge_node = src_data['rge_pmin_pmax'][['rge', 'p', 'hour']]\

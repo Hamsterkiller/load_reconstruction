@@ -120,6 +120,7 @@ def power_system_connectivity(node: pd.DataFrame, vetv: pd.DataFrame):
     nt = node['node'].searchsorted(vetv['node_to'], sorter=bus_index)
 
     bus_n = node.shape[0]
+    node.index = list(range(0, node.shape[0]))
     sw_bus = node.index[node.type == 0].tolist()
 
     adj = sp.coo_matrix((np.ones(len(nf)), (nf, nt)), shape=(bus_n, bus_n)).astype(int) \
@@ -129,23 +130,23 @@ def power_system_connectivity(node: pd.DataFrame, vetv: pd.DataFrame):
     for i in range(0, len(sw_bus)):
         is_connected = np.zeros(shape=bus_n)
         new_is_connected = np.zeros(shape=bus_n)
-        new_is_connected[i] = 1
+        new_is_connected[sw_bus[i]] = 1
 
         while any(new_is_connected != is_connected):
             is_connected = new_is_connected
             new_is_connected = is_connected + adj * is_connected
             new_is_connected[new_is_connected > 0] = 1
 
-        if any(bus_conn[is_connected > 0]):
+        if any(bus_conn[new_is_connected > 0]):
             print('More than one balance bus in connected area!')
             raise
 
-        bus_conn[new_is_connected > 0] = i
+        bus_conn[new_is_connected > 0] = sw_bus[i]
 
     line_conn = np.zeros(vetv.shape[0])
     for i in range(0, len(sw_bus)):
-        line_conn[np.isin(nf, np.where(bus_conn == i))] = i;
-        line_conn[np.isin(nt, np.where(bus_conn == i))] = i;
+        line_conn[np.isin(nf, np.where(bus_conn == sw_bus[i]))] = sw_bus[i]
+        line_conn[np.isin(nt, np.where(bus_conn == sw_bus[i]))] = sw_bus[i]
 
     return bus_conn, line_conn
 

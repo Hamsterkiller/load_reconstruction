@@ -156,8 +156,14 @@ class PowerSystem:
         self.vetv.loc[zero_idx, 'x'] = 0.04 / 100
 
     def create_pf_matrices(self):
-        shunt_b = self.node['bsh'].values.copy()
-        shunt_g = self.node['gsh'].values.copy()
+        # shunt_b = self.node['bsh'].values.copy()
+        # shunt_g = self.node['gsh'].values.copy()
+        shunt_b = np.zeros(self.bus_n)
+        shunt_g = np.zeros(self.bus_n)
+        # shunt_bus = find(obj.Bus.gsh ~= 0 | obj.Bus.bsh ~= 0);
+        shunt_bus = (self.node.gsh != 0.0) | (self.node.bsh != 0.0)
+        shunt_b[shunt_bus] = self.node.loc[shunt_bus, 'bsh'].values.copy()
+        shunt_g[shunt_bus] = self.node.loc[shunt_bus, 'gsh'].values.copy()
 
         #   Reactive loads at PQ buses (modelled as shunt with specified Qn at nominal voltage)
         shunt_b[self.pq_bus] = shunt_b[self.pq_bus] - self.node['qn'].values[self.pq_bus]
@@ -166,26 +172,37 @@ class PowerSystem:
 
         #   Branch admittances to the ground
         y_br = self.vetv['g'].values + 1j * self.vetv['b'].values
-        y_br_f = self.vetv['g_from'].values + 1j * self.vetv['b_from'].values
-        y_br_t = self.vetv['g_to'].values + 1j * self.vetv['b_to'].values
+        # y_br_f = self.vetv['g_from'].values + 1j * self.vetv['b_from'].values
+        # y_br_t = self.vetv['g_to'].values + 1j * self.vetv['b_to'].values
+        y_br_f = self.vetv['g'].values + 1j * self.vetv['b'].values
+        y_br_t = self.vetv['g'].values + 1j * self.vetv['b'].values
 
         #   Transformer admittances
         ts = self.vetv['ktr'].values + 1j * self.vetv['kti'].values
-        is_tr = np.abs(ts) > 0
+        # is_tr = np.abs(ts) > 0
+        is_tr = self.vetv.type == 1
+        is_line = self.vetv.type == 0
         ts[~is_tr] = 1.0
+        y_br_f[is_tr] = 0.0
+        y_br_t[is_tr] = 2 * y_br[is_tr]
+        y_br_f[is_line] = self.vetv.loc[is_line, 'g'].values + 2j * self.vetv.loc[is_line, 'b_from'].values
+        y_br_t[is_line] = self.vetv.loc[is_line, 'g'].values + 2j * self.vetv.loc[is_line, 'b_to'].values
+        # y_br_t = self.vetv['g'].values + 1j * self.vetv['b'].values
 
         #   We need it if we have different nominal voltages for different branch ends
         k = self.node['unom'].values[self.node_from] / self.node['unom'].values[self.node_to]
         ts *= k
-
-        y_br_f[is_tr] = y_br[is_tr]
-        y_br_t[is_tr] = 0
 
         #   Node-branch incidence matrices
         self.Cf = sp.csc_matrix((np.ones(self.line_n), (range(self.line_n), self.node_from)), shape=(self.line_n, self.bus_n))
         self.Ct = sp.csc_matrix((np.ones(self.line_n), (range(self.line_n), self.node_to)), shape=(self.line_n, self.bus_n))
 
         z = (self.vetv['r'] + 1j * self.vetv['x']).values
+        unomFrom = self.node.unom.iloc[self.node_from].tolist()
+        unomTo = self.node.unom.iloc[self.node_to].tolist()
+        baseV = np.array([np.max([unomFrom[i], unomTo[i]]) for i in range(0, self.line_n)])
+        # idx_zero = abs(real(z)) + abs(imag(z)) <= 1. / baseV. ^ 2;
+        idx_zero = (np.abs(z.real) + np.abs(z.imag)) <= (1.0 / baseV**2)
         y = 1 / z
 
         #  For each branch, compute the elements of the branch admittance matrix where
