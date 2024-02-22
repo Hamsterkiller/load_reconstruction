@@ -74,7 +74,7 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
 
     # construct graph of the system
     vetv_eq = vetv_equiv(vetv)
-    vetv_eq.loc[np.abs(vetv_eq['ktr']) < 1e-5, 'ktr'] = 1.0
+    # vetv_eq.loc[np.abs(vetv_eq['ktr']) < 1e-5, 'ktr'] = 1.0
     vetv_eq = vetv_eq.merge(node_u_values, left_on=['node_from'], right_on=['node'], how='left')
     vetv_eq.rename({'u': 'u_from'}, inplace=True, axis=1)
     vetv_eq.drop(['node'], axis=1, inplace=True)

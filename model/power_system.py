@@ -32,6 +32,11 @@ class PowerSystem:
     bus_n: int
     line_n: int
 
+    y: np.ndarray
+    ts: np.ndarray
+    y_br_f: np.ndarray
+    y_br_t: np.ndarray
+
     y_ff: np.ndarray
     y_ft: np.ndarray
     y_tf: np.ndarray
@@ -113,6 +118,24 @@ class PowerSystem:
         unom_from = self.node['unom'].values[self.node_from]
         unom_to = self.node['unom'].values[self.node_to]
 
+        self.vetv['node_from_orig'] = self.vetv['node_from']
+        self.vetv['node_to_orig'] = self.vetv['node_to']
+
+        self.vetv['ts'] = self.vetv['ktr'].values + 1j * self.vetv['kti'].values
+        is_tr = np.abs(self.vetv['ts']) > 0
+        vf = self.node.unom.iloc[self.node_from].values
+        vt = self.node.unom.iloc[self.node_to].values
+        is_tr[vf < vt] = False
+        self.vetv.loc[is_tr, 'node_from'] = self.vetv.loc[is_tr, 'node_to_orig']
+        self.vetv.loc[is_tr, 'node_to'] = self.vetv.loc[is_tr, 'node_from_orig']
+        self.vetv.loc[is_tr, 'p_from'] = self.vetv.loc[is_tr, 'p_to']
+        self.vetv.loc[is_tr, 'p_to'] = self.vetv.loc[is_tr, 'p_from']
+        self.vetv.sort_values(['node_from', 'node_to', 'pnum'], inplace=True)
+        self.vetv.index = list(range(0, self.vetv.shape[0]))
+        bus_index = self.node['node'].argsort()
+        self.node_from = self.node['node'].searchsorted(self.vetv['node_from'], sorter=bus_index)
+        self.node_to = self.node['node'].searchsorted(self.vetv['node_to'], sorter=bus_index)
+
         self.vetv['r'] = convert_to_relative_units(self.vetv['r'], 'Ohm', unom_from)
         self.vetv['x'] = convert_to_relative_units(self.vetv['x'], 'Ohm', unom_from)
 
@@ -178,7 +201,7 @@ class PowerSystem:
         y_br_t = self.vetv['g'].values + 1j * self.vetv['b'].values
 
         #   Transformer admittances
-        ts = self.vetv['ktr'].values + 1j * self.vetv['kti'].values
+        ts = self.vetv.ts
         # is_tr = np.abs(ts) > 0
         is_tr = self.vetv.type == 1
         is_line = self.vetv.type == 0
@@ -190,7 +213,7 @@ class PowerSystem:
         # y_br_t = self.vetv['g'].values + 1j * self.vetv['b'].values
 
         #   We need it if we have different nominal voltages for different branch ends
-        k = self.node['unom'].values[self.node_from] / self.node['unom'].values[self.node_to]
+        k = self.node['unom'].values[self.node_to] / self.node['unom'].values[self.node_from]
         ts *= k
 
         #   Node-branch incidence matrices
@@ -203,16 +226,22 @@ class PowerSystem:
         baseV = np.array([np.max([unomFrom[i], unomTo[i]]) for i in range(0, self.line_n)])
         # idx_zero = abs(real(z)) + abs(imag(z)) <= 1. / baseV. ^ 2;
         idx_zero = (np.abs(z.real) + np.abs(z.imag)) <= (1.0 / baseV**2)
+        z[idx_zero] = 0.04j / 100
         y = 1 / z
 
         #  For each branch, compute the elements of the branch admittance matrix where
         #  | If |   | Yff  Yft |   | Vf |
         #  |    | = |          | * |    |
         #  | It |   | Ytf  Ytt |   | Vt |
-        self.y_ff = y + y_br_f
-        self.y_ft = -y / ts
-        self.y_tf = -y / ts.conj()
-        self.y_tt = y / (ts * ts.conj()) + y_br_t
+        # self.y_ff = y + y_br_f
+        # self.y_ft = -y / ts
+        # self.y_tf = -y / ts.conj()
+        # self.y_tt = y / (ts * ts.conj()) + y_br_t
+        ts2 = (ts * ts.conj()).real
+        self.y_ff = (y + y_br_f / 2) / ts2
+        self.y_ft = -y / ts.conj()
+        self.y_tf = -y / ts
+        self.y_tt = y + y_br_t / 2
 
         self.y = y
         self.ts = ts
