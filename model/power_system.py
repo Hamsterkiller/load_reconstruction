@@ -128,29 +128,38 @@ class PowerSystem:
         is_tr[vf < vt] = False
         self.vetv.loc[is_tr, 'node_from'] = self.vetv.loc[is_tr, 'node_to_orig']
         self.vetv.loc[is_tr, 'node_to'] = self.vetv.loc[is_tr, 'node_from_orig']
+        orig_p_from = self.vetv.loc[is_tr, 'p_from']
         self.vetv.loc[is_tr, 'p_from'] = self.vetv.loc[is_tr, 'p_to']
-        self.vetv.loc[is_tr, 'p_to'] = self.vetv.loc[is_tr, 'p_from']
+        self.vetv.loc[is_tr, 'p_to'] = orig_p_from
         self.vetv.sort_values(['node_from', 'node_to', 'pnum'], inplace=True)
         self.vetv.index = list(range(0, self.vetv.shape[0]))
         bus_index = self.node['node'].argsort()
         self.node_from = self.node['node'].searchsorted(self.vetv['node_from'], sorter=bus_index)
         self.node_to = self.node['node'].searchsorted(self.vetv['node_to'], sorter=bus_index)
 
-        self.vetv['r'] = convert_to_relative_units(self.vetv['r'], 'Ohm', unom_from)
-        self.vetv['x'] = convert_to_relative_units(self.vetv['x'], 'Ohm', unom_from)
+        unomFrom = self.node.unom.iloc[self.node_from].tolist()
+        unomTo = self.node.unom.iloc[self.node_to].tolist()
+        baseV = np.array([np.max([unomFrom[i], unomTo[i]]) for i in range(0, self.line_n)])
 
-        self.vetv['g'] = convert_to_relative_units(self.vetv['g'], 'µS', unom_from)
-        self.vetv['g_from'] = convert_to_relative_units(self.vetv['g_from'], 'µS', unom_from)
-        self.vetv['g_to'] = convert_to_relative_units(self.vetv['g_to'], 'µS', unom_to)
+        #   We need it if we have different nominal voltages for different branch ends
+        self.vetv['ts'] = self.vetv['ts'].values * np.array(unomTo) / np.array(unomFrom)
 
-        self.vetv['b'] = -convert_to_relative_units(self.vetv['b'], 'µS', unom_from)
-        self.vetv['b_from'] = -convert_to_relative_units(self.vetv['b_from'], 'µS', unom_from)
-        self.vetv['b_to'] = -convert_to_relative_units(self.vetv['b_to'], 'µS', unom_to)
+        self.vetv['r'] = convert_to_relative_units(self.vetv['r'], 'Ohm', baseV)
+        self.vetv['x'] = convert_to_relative_units(self.vetv['x'], 'Ohm', baseV)
 
-        self.vetv['u_from'] = convert_to_relative_units(self.vetv['u_from'], 'kV', unom_from)
-        self.vetv['u_to'] = convert_to_relative_units(self.vetv['u_to'], 'kV', unom_to)
-        self.vetv['p_from'] = convert_to_relative_units(self.vetv['p_from'], 'MW', unom_from)
-        self.vetv['p_to'] = convert_to_relative_units(self.vetv['p_to'], 'MW', unom_to)
+        self.vetv['g'] = convert_to_relative_units(self.vetv['g'], 'µS', baseV)
+        self.vetv['g_from'] = convert_to_relative_units(self.vetv['g_from'], 'µS', baseV)
+        self.vetv['g_to'] = convert_to_relative_units(self.vetv['g_to'], 'µS', baseV)
+
+        self.vetv['b'] = -convert_to_relative_units(self.vetv['b'], 'µS', baseV)
+        self.vetv['b_from'] = -convert_to_relative_units(self.vetv['b_from'], 'µS', baseV)
+        self.vetv['b_to'] = -convert_to_relative_units(self.vetv['b_to'], 'µS', baseV)
+
+        self.vetv['u_from'] = convert_to_relative_units(self.vetv['u_from'], 'kV', baseV)
+        self.vetv['u_to'] = convert_to_relative_units(self.vetv['u_to'], 'kV', baseV)
+
+        self.vetv['p_from'] = convert_to_relative_units(self.vetv['p_from'], 'MW', baseV)
+        self.vetv['p_to'] = convert_to_relative_units(self.vetv['p_to'], 'MW', baseV)
         # self.vetv['ktr'] = self.vetv['ktr'] / unom_to * unom_from
         # self.vetv['kti'] = self.vetv['kti'] / unom_to * unom_from
 
@@ -201,7 +210,7 @@ class PowerSystem:
         y_br_t = self.vetv['g'].values + 1j * self.vetv['b'].values
 
         #   Transformer admittances
-        ts = self.vetv.ts
+        ts = self.vetv.ts.values
         # is_tr = np.abs(ts) > 0
         is_tr = self.vetv.type == 1
         is_line = self.vetv.type == 0
@@ -211,10 +220,6 @@ class PowerSystem:
         y_br_f[is_line] = self.vetv.loc[is_line, 'g'].values + 2j * self.vetv.loc[is_line, 'b_from'].values
         y_br_t[is_line] = self.vetv.loc[is_line, 'g'].values + 2j * self.vetv.loc[is_line, 'b_to'].values
         # y_br_t = self.vetv['g'].values + 1j * self.vetv['b'].values
-
-        #   We need it if we have different nominal voltages for different branch ends
-        k = self.node['unom'].values[self.node_to] / self.node['unom'].values[self.node_from]
-        ts *= k
 
         #   Node-branch incidence matrices
         self.Cf = sp.csc_matrix((np.ones(self.line_n), (range(self.line_n), self.node_from)), shape=(self.line_n, self.bus_n))

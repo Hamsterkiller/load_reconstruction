@@ -93,6 +93,9 @@ def solve_flow_equations(uf: float,
     if np.abs(ktr) < 1e-5:
         ktr = 1
 
+    if (ktr != 1) & (uf < 0):
+        a = 1
+
     ut = ut / ktr
 
     # for switches return u_unknown=u_known, dd=1e-5
@@ -126,9 +129,9 @@ def solve_flow_equations(uf: float,
 
     # for lines, which both g and G are near to zero - return default values
     if (np.abs(G) < 1e-6) & (np.abs(g) < 1e-6):
-        u_strange = uf * (1 - 1e-3)
+        u_strange = uf * (1 - 1e-3) * ktr
         if uf < 0:
-            u_strange = ut * (1 + 1e-3)
+            u_strange = ut * (1 + 1e-3) / ktr
         return {'u': u_strange, 'dd': 1e-5}
 
     # there's two possible cases (uf is unknown and ut is unknown)]
@@ -252,6 +255,8 @@ def calc_unknown_u_modules(g: nx.Graph):
 
     while unknown_u_edges:
         for nf, nt, v in unknown_u_edges:
+            if (nf == 408531) | (nt == 408531):
+                a = 1
             # print(f"{nf} - {nt}")
             if (g.nodes[v['node_from']].get('u', -1) > 0) & (g.nodes[v['node_to']].get('u', -1) > 0):
                 unknown_u_edges.remove((nf, nt, v))
@@ -266,8 +271,9 @@ def calc_unknown_u_modules(g: nx.Graph):
                                      g.edges[nf, nt].get('x'),
                                      g.edges[nf, nt].get('gsh'),
                                      g.edges[nf, nt].get('bsh'))
-                g.nodes[v['node_from']]['u'] = solution['u'] * g.nodes[v['node_to']]['unom'] / g.nodes[v['node_from']]['unom']
+                g.nodes[v['node_from']]['u'] = solution['u'] #* g.nodes[v['node_to']]['unom'] / g.nodes[v['node_from']]['unom']
                 g.edges[nf, nt]['dd'] = solution['dd']
+                print(f"{v['node_from']} - {v['node_to']}'")
                 print(f"Unknown voltage module = {solution['u']}, angle = {solution['dd']}, type = {v['type']}, ktr = {v['ktr']}, ut = {g.nodes[v['node_to']]['u']}")
                 unknown_u_edges.remove((nf, nt, v))
             if (g.nodes[v['node_from']].get('u', -1) > 0) & (g.nodes[v['node_to']].get('u', -1) < 0):
@@ -281,8 +287,9 @@ def calc_unknown_u_modules(g: nx.Graph):
                                      g.edges[nf, nt].get('x'),
                                      g.edges[nf, nt].get('gsh'),
                                      g.edges[nf, nt].get('bsh'))
-                g.nodes[v['node_to']]['u'] = solution['u'] * g.nodes[v['node_from']]['unom'] / g.nodes[v['node_to']]['unom']
+                g.nodes[v['node_to']]['u'] = solution['u'] #* g.nodes[v['node_from']]['unom'] / g.nodes[v['node_to']]['unom']
                 g.edges[nf, nt]['dd'] = solution['dd']
+                print(f"{v['node_from']} - {v['node_to']}'")
                 print(f"Unknown voltage module = {solution['u']}, angle = {solution['dd']}, type = {v['type']}, ktr = {v['ktr']}, uf = {g.nodes[v['node_from']]['u']}")
                 unknown_u_edges.remove((nf, nt, v))
 

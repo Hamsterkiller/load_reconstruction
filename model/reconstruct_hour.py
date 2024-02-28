@@ -98,15 +98,26 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     node = node.loc[bus_conn == main_balance]
     vetv = vetv_eq.loc[line_conn == main_balance]
 
-    # initialize PowerSystem instance
-    ps = PowerSystem(node, vetv)
-    vetv_dict = ps.vetv.to_dict(orient='records')
-    node_dict = ps.node.to_dict(orient='records')
-    node_u_values = node_u_values[node_u_values.node.isin(ps.node.node)]
-    node_u_values = node_u_values.merge(right=ps.node[['node', 'unom']], on=['node'], how='left')
-    relative_u_values = convert_to_relative_units(node_u_values['u'].values, 'kV', node_u_values['unom'].values)
-    node_u_values.u = relative_u_values
-    node_u_values.drop(['unom'], axis=1, inplace=True)
+    # reverse lines with vf < vt
+    vetv['node_from_orig'] = vetv['node_from']
+    vetv['node_to_orig'] = vetv['node_to']
+    vetv = vetv.merge(right=node[['node', 'unom']], left_on=['node_from'], right_on=['node'], how='left')
+    vetv.drop(['node'], axis=1, inplace=True)
+    vetv.rename({'unom': 'unom_from'}, axis=1, inplace=True)
+    vetv = vetv.merge(right=node[['node', 'unom']], left_on=['node_to'], right_on=['node'], how='left')
+    vetv.drop(['node'], axis=1, inplace=True)
+    vetv.rename({'unom': 'unom_to'}, axis=1, inplace=True)
+    is_reversed = (vetv.type == 1) & (vetv.unom_from < vetv.unom_to)
+    vetv.loc[is_reversed, 'node_from'] = vetv.loc[is_reversed, 'node_to_orig']
+    vetv.loc[is_reversed, 'node_to'] = vetv.loc[is_reversed, 'node_from_orig']
+    orig_p_from = vetv.loc[is_reversed, 'p_from']
+    vetv.loc[is_reversed, 'p_from'] = vetv.loc[is_reversed, 'p_to']
+    vetv.loc[is_reversed, 'p_to'] = orig_p_from
+
+    vetv_dict = vetv.to_dict(orient='records')
+    node_dict = node.to_dict(orient='records')
+    node_u_values = node_u_values[node_u_values.node.isin(node.node)]
+    node_u_values = node_u_values.merge(right=node[['node', 'unom']], on=['node'], how='left')
     node_u_dict = node_u_values.to_dict(orient='records')
 
     system_graph = create_system_graph(node_dict, vetv_dict, node_u_dict)
@@ -119,6 +130,19 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     for n, v in system_graph.nodes(data=True):
         u_dict_df.append({'node': n, 'u': v['u']})
     u_df = pd.DataFrame.from_records(u_dict_df)
+    u_df = u_df.merge(right=node[['node', 'unom']], on=['node'], how='left')
+
+    # initialize PowerSystem instance
+    ps = PowerSystem(node, vetv)
+    # vetv_dict = ps.vetv.to_dict(orient='records')
+    # node_dict = ps.node.to_dict(orient='records')
+    # node_u_values = node_u_values[node_u_values.node.isin(ps.node.node)]
+    # node_u_values = node_u_values.merge(right=ps.node[['node', 'unom']], on=['node'], how='left')
+    # relative_u_values = convert_to_relative_units(node_u_values['u'].values, 'kV', node_u_values['unom'].values)
+    # node_u_values.u = relative_u_values
+    # node_u_values.drop(['unom'], axis=1, inplace=True)
+    # node_u_dict = node_u_values.to_dict(orient='records')
+
 
     # calculate dd for each line in graph without known dd
     calc_u_deltas(system_graph)
