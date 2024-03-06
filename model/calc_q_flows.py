@@ -18,60 +18,70 @@ def calc_q_flows(graph: nx.Graph):
     result_dict = []
     for nf, nt, v in graph.edges(data=True):
 
+        if (v['node_from'] == 804130) & (v['node_to'] == 804530):
+            a = 1
+
         # get line parameters
         uf = graph.nodes[v['node_from']].get('u')
         ut = graph.nodes[v['node_to']].get('u')
         type = v['type']
-        pf = v['p_from']
-        pt = v['p_to']
-        ktr = v['ktr']
-        r = v['r']
-        x = v['x']
-        gsh = v['gsh']
-        bsh = v['bsh']
-
-        # calc other params
-        ts = ktr
-        if type != 1:
-            ts = 1
-        ut = ut / ts
-        # shunt conductance
-        G = gsh
-        B = bsh
-        if type == 1:
-            # for transformators equivalent scheme is G-like
-            G_f = G * 1e-6
-            G_t = 0.0
-            B_f = B * 1e-6
-            B_t = 0.0
+        if type == 2:
+            result_dict.append({'node_from': v['node_from'], 'node_to': v['node_to'], 'q_from': 0, 'q_to': 0})
         else:
-            # for ordinary lines equivalent scheme P-like
-            G_f = (G / 2) * 1e-6
-            G_t = (G / 2) * 1e-6
-            B_f = (B / 2) * 1e-6
-            B_t = (B / 2) * 1e-6
+            pf = v['p_from']
+            pt = v['p_to']
+            ktr = v['ktr']
+            r = v['r']
+            x = v['x']
+            gsh = v['gsh']
+            bsh = v['bsh']
 
-        # conductance
-        R = r
-        X = x
+            # calc other params
+            ts = ktr
+            if type != 1:
+                ts = 1
+            ut = ut / ts
+            # shunt conductance
+            G = gsh
+            B = bsh
+            if type == 1:
+                # for transformators equivalent scheme is G-like
+                G_f = G * 1e-6
+                G_t = 0.0
+                B_f = B * 1e-6
+                B_t = 0.0
+            else:
+                # for ordinary lines equivalent scheme P-like
+                G_f = (G / 2) * 1e-6
+                G_t = (G / 2) * 1e-6
+                B_f = (B / 2) * 1e-6
+                B_t = (B / 2) * 1e-6
 
-        # fix near-zero impedance values
-        # if np.abs(R + 1j * X) <= 1e-5:
-        #     X = 0.04 / 100
+            # conductance
+            R = r
+            X = x
 
-        g = R / (R ** 2 + X ** 2)
-        b = -X / (R ** 2 + X ** 2)
+            # fix near-zero impedance values
+            # if np.abs(R + 1j * X) <= 1e-5:
+            #     X = 0.04 / 100
 
-        dd = v['dd']
+            g = R / (R ** 2 + X ** 2)
+            b = -X / (R ** 2 + X ** 2)
 
-        # reactive power flows
-        if (v['node_from'] == 100112) & (v['node_to'] == 100113):
-            a = 1
+            dd = v['dd']
 
-        qf = b * (uf ** 2 - uf * ut * np.cos(dd)) - g * (uf * ut * np.sin(dd)) + B_f * uf ** 2
-        qt = b * (ut ** 2 - uf * ut * np.cos(dd)) + g * (uf * ut * np.sin(dd)) + B_t * ut ** 2
+            # reactive power flows
+            qf = b * (uf ** 2 - uf * ut * np.cos(dd)) - g * (uf * ut * np.sin(dd)) + B_f * uf ** 2
+            qt = b * (ut ** 2 - uf * ut * np.cos(dd)) + g * (uf * ut * np.sin(dd)) + B_t * ut ** 2
 
-        result_dict.append({'node_from': v['node_from'], 'node_to': v['node_to'], 'qf': qf, 'qt': qt})
+            if (np.abs(qf) > 1000) | (np.abs(qt) > 1000):
+                R = 1000
+                g = R / (R ** 2 + X ** 2)
+                b = -X / (R ** 2 + X ** 2)
+                qf = b * (uf ** 2 - uf * ut * np.cos(dd)) - g * (uf * ut * np.sin(dd)) + B_f * uf ** 2
+                qt = b * (ut ** 2 - uf * ut * np.cos(dd)) + g * (uf * ut * np.sin(dd)) + B_t * ut ** 2
+
+            result_dict.append({'node_from': v['node_from'], 'node_to': v['node_to'], 'q_from': qf, 'q_to': qt})
 
     result_df = pd.DataFrame.from_records(result_dict)
 

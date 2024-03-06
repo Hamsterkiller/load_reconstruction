@@ -8,29 +8,37 @@ from .power_system import PowerSystem
 from .helpers import convert_to_relative_units
 
 
-def calc_q_injections(ps: PowerSystem, line_flows: pd.DataFrame, q_f: pd.DataFrame, q_t: pd.DataFrame) -> np.ndarray:
+def calc_q_injections(node: pd.DataFrame, vetv: pd.DataFrame) -> pd.DataFrame:
 
     """
     Calculate qg injections in each node.
-    :param line_flows: table with line flows data
-    :param q_f: flow
-    :param q_t:
+    :param node: table with node topology
+    :param vetv: table with line topology and power flows
     :return:
     """
 
-    flows_df = line_flows[['node_from', 'node_to', 'pnum']]
-    flows_df['q_from'] = q_f
-    flows_df['q_to'] = q_t
+    bus_n = node.shape[0]
+    line_n = vetv.shape[0]
+    node_df = node.sort_values(by=['node']).copy()
+    line_df = vetv.sort_values(by=['node_from', 'node_to']).copy()
+    bus_index = node_df['node'].argsort()
+    nf = node_df['node'].searchsorted(line_df['node_from'], sorter=bus_index)
+    nt = node_df['node'].searchsorted(line_df['node_to'], sorter=bus_index)
+    qf = line_df.q_from.values
+    qt = line_df.q_to.values
 
-    N_f = coo_matrix((numpy.ones(ps.line_n), (ps.node_from, range(0, ps.line_n))), shape=(ps.bus_n, ps.line_n)).astype(
+    N_f = coo_matrix((numpy.ones(line_n), (nf, range(0, line_n))), shape=(bus_n, line_n)).astype(
         bool)
-    N_t = coo_matrix((numpy.ones(ps.line_n), (ps.node_to, range(0, ps.line_n))), shape=(ps.bus_n, ps.line_n)).astype(
+    N_t = coo_matrix((numpy.ones(line_n), (nt, range(0, line_n))), shape=(bus_n, line_n)).astype(
         bool)
 
-    flow_from = q_f.reshape(ps.line_n, 1)
-    flow_to = q_t.reshape(ps.line_n, 1)
+    flow_from = qf.reshape(line_n, 1)
+    flow_to = qt.reshape(line_n, 1)
 
     qg = -1 * (N_f * flow_from + N_t * flow_to)
 
-    return qg
+    qg_df = pd.DataFrame(node_df[['node']])
+    qg_df['qg'] = qg
+
+    return qg_df
 

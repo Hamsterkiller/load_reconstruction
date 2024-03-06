@@ -111,7 +111,7 @@ class PowerSystem:
         self.node['bsh'] = -convert_to_relative_units(self.node['bsh'], 'µS', self.node['unom'])
 
         #   Incorrect voltage magnitude for PV/SW-type buses, fix it
-        self.node.loc[(self.node['type'] != self.bus_type_pq) & (self.node['vzd'] < 0.5), 'vzd'] = 1
+        self.node.loc[(self.node['type'] != self.bus_type_pq) & (self.node['vzd'] < 0.75), 'vzd'] = 1
 
         # unom_max = np.maximum(self.node['unom'].values[self.node_from], self.node['unom'].values[self.node_to])
         # unom_min = np.minimum(self.node['unom'].values[self.node_from], self.node['unom'].values[self.node_to])

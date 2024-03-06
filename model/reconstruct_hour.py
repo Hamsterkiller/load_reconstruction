@@ -44,7 +44,8 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
             else:
                 parallel_flows.at[idx, 'p_to'] = -1.001 * parallel_flows.iloc[idx].p_from
         else:
-            raise Exception(f"Vetv {parallel_flows.iloc[idx].node_from} - {parallel_flows.iloc[idx].node_to} has empty flow fields!")
+            raise Exception(f"Vetv {parallel_flows.iloc[idx].node_from} "
+                            f"- {parallel_flows.iloc[idx].node_to} has empty flow fields!")
 
     vetv_direct = vetv.merge(right=parallel_flows, on=['node_from', 'node_to', 'pnum'], how='inner')
     vetv_inverse = vetv.merge(right=parallel_flows, left_on=['node_from', 'node_to', 'pnum'],
@@ -114,6 +115,21 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     vetv.loc[is_reversed, 'p_from'] = vetv.loc[is_reversed, 'p_to']
     vetv.loc[is_reversed, 'p_to'] = orig_p_from
 
+    # remove reversed but the same lines
+    same_lines = vetv[['node_from', 'node_to']].merge(right=vetv[['node_from', 'node_to']],
+                                                      left_on=['node_from', 'node_to'],
+                                                      right_on=['node_to', 'node_from'],
+                                                      how='inner')[['node_from_x', 'node_to_x']]
+    same_lines.rename({'node_from_x': 'node_from', 'node_to_x': 'node_to'}, inplace=True, axis=1)
+    unique_lines = []
+    for index, row in same_lines.iterrows():
+        if [row['node_to'], row['node_from']] not in unique_lines:
+            unique_lines.append([row['node_from'], row['node_to']])
+    for row in unique_lines:
+        df_idx = vetv.index[(vetv.node_from == row[1]) & (vetv.node_to == row[0])]
+        vetv.drop(index=df_idx, inplace=True, axis=0)
+    vetv.index = list(range(vetv.shape[0]))
+
     vetv_dict = vetv.to_dict(orient='records')
     node_dict = node.to_dict(orient='records')
     node_u_values = node_u_values[node_u_values.node.isin(node.node)]
@@ -121,6 +137,7 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     node_u_dict = node_u_values.to_dict(orient='records')
 
     system_graph = create_system_graph(node_dict, vetv_dict, node_u_dict)
+
 
     # calculate u value for each node with unknown u
     calc_unknown_u_modules(system_graph)
@@ -132,18 +149,6 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     u_df = pd.DataFrame.from_records(u_dict_df)
     u_df = u_df.merge(right=node[['node', 'unom']], on=['node'], how='left')
 
-    # initialize PowerSystem instance
-    ps = PowerSystem(node, vetv)
-    # vetv_dict = ps.vetv.to_dict(orient='records')
-    # node_dict = ps.node.to_dict(orient='records')
-    # node_u_values = node_u_values[node_u_values.node.isin(ps.node.node)]
-    # node_u_values = node_u_values.merge(right=ps.node[['node', 'unom']], on=['node'], how='left')
-    # relative_u_values = convert_to_relative_units(node_u_values['u'].values, 'kV', node_u_values['unom'].values)
-    # node_u_values.u = relative_u_values
-    # node_u_values.drop(['unom'], axis=1, inplace=True)
-    # node_u_dict = node_u_values.to_dict(orient='records')
-
-
     # calculate dd for each line in graph without known dd
     calc_u_deltas(system_graph)
     dd_dict_df = []
@@ -151,17 +156,27 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
         dd_dict_df.append({'node_from': v['node_from'], 'node_to': v['node_to'], 'dd': v['dd']})
     dd_df = pd.DataFrame.from_records(dd_dict_df)
 
-    # calculate reactive power flows for each line in the system and qn in each node
+    # reactive capacity flows
     q_flows = calc_q_flows(system_graph)
 
-    # calculate qg bus injections
-    # qg = calc_q_injections(ps, line_flows, Q_f, Q_t)
+    # merge vetv and reactive pwoer flows
+    vetv = vetv.merge(right=q_flows, on=['node_from', 'node_to'], how='left')
 
-    # correct u values of needed
-    # u_df = ps.node[['node', 'unom']].merge(right=u_df, on=['node'], how='left')
-    # strange_idx = u_df.index[(u_df.u / u_df.unom > 1.5) | (u_df.u / u_df.unom < 0.5)]
-    # for idx in strange_idx:
-    #     u_df.at[idx, 'u'] = u_df.iloc[idx].unom
+    # calculate qg bus injections
+    qg_df = calc_q_injections(node, vetv)
+
+    # calculate pn for each node in the system
+    pg_df = calc_node_pn(node, vetv)
+
+    # initialize PowerSystem instance
+    ps = PowerSystem(node, vetv)
+
+    # convert qg and pg to relative values
+    qg_rel = convert_to_relative_units(qg_df.qg, 'MW', node.unom.values).values
+    pg_rel = convert_to_relative_units(pg_df.pg, 'MW', node.unom.values).values
+    pg_rel = pg_rel.reshape(-1)
+    qg_rel = qg_rel.reshape(-1)
+    Vbus, normF, converged = calc_rgm_newton(ps, pg_rel, np.zeros(pg_rel.size), verbose=True)
 
     # calculate gen volumes for each node
     rge_node = src_data['rge_pmin_pmax'][['rge', 'p', 'hour']]\
@@ -177,7 +192,7 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     node_pg['pg'] /= 100
 
     # calculate pn for each node in the system
-    pn = calc_node_pn(ps, node_pg)
+    # pn = calc_node_pn(ps, node_pg)
     # node_pn = pd.concat([node_pg.node, pd.Series(pn.reshape(-1))], axis=1)
     # node_pn.columns = ['node', 'pn']
     # node_pg = node_pg.merge(right=node_pn, on=['node'], how='left')

@@ -12,7 +12,9 @@ def create_system_graph(topo_node: list, topo_vetv: list, node_u: list) -> nx.Gr
     """
 
     g = nx.Graph()
+    i = 0
     for row in topo_vetv:
+        i += 1
         g.add_edge(row.get('node_from'), row.get('node_to'))
 
     # add U and Unom attributes for each node

@@ -7,27 +7,36 @@ from scipy.sparse import coo_matrix
 from .power_system import PowerSystem, convert_to_relative_units
 
 
-def calc_node_pn(ps: PowerSystem, node_pg: pd.DataFrame) -> np.ndarray:
+def calc_node_pn(node: pd.DataFrame, vetv: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculate node loads.
-    :param ps - instance of the PowerSystem class
-    :param parallel_flows - line flow values by parallel
-    :param node_pg - pg values for nodes
+    Calculate node active power injections.
+    :param node - table with node topology
+    :param vetv - table with line topology and power flows
     :return:
     """
 
-    N_f = coo_matrix((numpy.ones(ps.line_n), (ps.node_from, range(0, ps.line_n))), shape=(ps.bus_n, ps.line_n)).astype(bool)
-    N_t = coo_matrix((numpy.ones(ps.line_n), (ps.node_to, range(0, ps.line_n))), shape=(ps.bus_n, ps.line_n)).astype(bool)
+    bus_n = node.shape[0]
+    line_n = vetv.shape[0]
+    node_df = node.sort_values(by=['node']).copy()
+    line_df = vetv.sort_values(by=['node_from', 'node_to']).copy()
+    bus_index = node_df['node'].argsort()
+    nf = node_df['node'].searchsorted(line_df['node_from'], sorter=bus_index)
+    nt = node_df['node'].searchsorted(line_df['node_to'], sorter=bus_index)
+    pf = line_df.p_from.values
+    pt = line_df.p_to.values
 
-    flow_from = np.array(ps.vetv.p_from).reshape(ps.line_n, 1)
-    flow_to = np.array(ps.vetv.p_to).reshape(ps.line_n, 1)
+    N_f = coo_matrix((numpy.ones(line_n), (nf, range(0, line_n))), shape=(bus_n, line_n)).astype(bool)
+    N_t = coo_matrix((numpy.ones(line_n), (nt, range(0, line_n))), shape=(bus_n, line_n)).astype(bool)
 
-    pg = convert_to_relative_units(np.array(node_pg.pg).reshape(node_pg.shape[0], 1), 'MW', np.ones(node_pg.shape[0]))
+    flow_from = np.array(pf).reshape(line_n, 1)
+    flow_to = np.array(pt).reshape(line_n, 1)
 
-    # pn = -1 * (N_f * flow_from + N_t * flow_to - pg)\
-    pn = N_f * flow_from + N_t * flow_to
+    pg = N_f * flow_from + N_t * flow_to
 
-    return pn
+    pg_df = pd.DataFrame(node[['node']])
+    pg_df['pg'] = pg
+
+    return pg_df
 
 
 
