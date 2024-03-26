@@ -176,42 +176,10 @@ def reconstruct_hour(hour: int, topology_data: dict[str, pd.DataFrame], src_data
     pg_rel = convert_to_relative_units(pg_df.pg, 'MW', node.unom.values).values
     pg_rel = pg_rel.reshape(-1)
     qg_rel = qg_rel.reshape(-1)
-    Vbus, normF, converged = calc_rgm_newton(ps, pg_rel, np.zeros(pg_rel.size), verbose=True)
+    # Vbus, normF, converged = calc_rgm_newton(ps, pg_rel, np.zeros(pg_rel.size), verbose=True)
+    Vbus, normF, converged = calc_rgm_newton(ps, pg_rel, qg_rel, verbose=True)
 
-    # calculate gen volumes for each node
-    rge_node = src_data['rge_pmin_pmax'][['rge', 'p', 'hour']]\
-                                                    .merge(right=topology_data['rge'][['rge', 'node']],
-                                                        on=['rge'],
-                                                        how='left')\
-                                                    .query(f'hour=={hour}')\
-                                                    .drop(['hour'], axis=1)
-    node_pg = rge_node.groupby(['node'], as_index=False).sum('p').drop(['rge'], axis=1)
-    node_pg = ps.node.node.to_frame().merge(right=node_pg, on=['node'], how='left').fillna(0)
-    node_pg.rename({'p': 'pg'}, axis=1, inplace=True)
-    node_pg = ps.node['node'].to_frame().merge(right=node_pg, on=['node'], how='left')
-    node_pg['pg'] /= 100
 
-    # calculate pn for each node in the system
-    # pn = calc_node_pn(ps, node_pg)
-    # node_pn = pd.concat([node_pg.node, pd.Series(pn.reshape(-1))], axis=1)
-    # node_pn.columns = ['node', 'pn']
-    # node_pg = node_pg.merge(right=node_pn, on=['node'], how='left')
-
-    # calculate regime using Newton method
-    # pg = np.array(node_pg.pg).reshape(node_pg.shape[0], 1)
-    # p = (pg - pn).reshape(-1)
-    p = pn.reshape(-1)
-    # TODO replace with calculated qg values
-    q = np.zeros(p.shape[0])
-    Vbus, normF, converged = calc_rgm_newton(ps, p, q, verbose=True)
-
-    # calculate qn for each node in the system, that has published U value
-    # node_qn = ps.node[['node', 'qn', 'unom']].merge(right=node_u_values, on=['node'], how='inner')
-    # node_qn['qn_new'] = node_qn['qn'] * node_qn['u']**2 / node_qn['unom']**2
-
-    # calculate qn for nodes where U values are unknown
-    # nodes_with_known_u = node_qn.node.unique()
-    # nodes_with_unknown_u = [n for n in ps.node['node'].tolist() if n not in nodes_with_known_u]
 
 
 
